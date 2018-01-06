@@ -58,7 +58,8 @@ class NMTModel(object):
             tgt_embedding = tgt_embedding * tgt_embedding_mask
 
             input_embedding = tf.nn.embedding_lookup(src_embedding, self.input_tokens)
-            output_embedding = tf.nn.embedding_lookup(tgt_embedding, self.output_tokens)
+            if not self.forward_only:
+                output_embedding = tf.nn.embedding_lookup(tgt_embedding, self.output_tokens)
 
         with tf.variable_scope("encoder"):
             # bi-gru-rnn
@@ -69,6 +70,9 @@ class NMTModel(object):
                 fwd_sent_cell, bwd_sent_cell,
                 input_embedding, sequence_length=self.input_lens,
                 dtype=tf.float32)
+            
+            encoder_outputs = tf.concat(encoder_outputs, -1)
+            # encoder_state = tf.concat(encoder_state, -1)
 
         with tf.variable_scope("decoder"):
             if self.forward_only:
@@ -82,7 +86,7 @@ class NMTModel(object):
             attention_states = encoder_outputs
             attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(
                     self.dec_cell_size, attention_states, memory_sequence_length=self.input_lens)
-            dec_cell = self.get_rnncell("gru", self.dec_cell_size, keep_prob=1.0, num_layer=1)
+            dec_cell = self.get_rnncell("gru", self.dec_cell_size, keep_prob=1.0, num_layer=2)
             attn_cell = tf.contrib.seq2seq.AttentionWrapper(
                 dec_cell, attention_mechanism,
                 output_attention=False
@@ -108,7 +112,7 @@ class NMTModel(object):
             with tf.variable_scope("loss"):
                 labels = self.output_tokens[:, 1:]
                 dec_output_embedding = output_embedding[:, 1:, :]
-                label_mask = tf.to_float(tf.sign(tf.reduce_max(tf.abs(dec_output_embedding), reduction_indices=2)),reduction_indices=1)
+                label_mask = tf.to_float(tf.sign(tf.reduce_max(tf.abs(dec_output_embedding), reduction_indices=2)))
 
                 rc_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=dec_outs, labels=labels)
                 rc_loss = tf.reduce_sum(rc_loss * label_mask, reduction_indices=1)
@@ -134,16 +138,22 @@ class NMTModel(object):
         self.train_ops = optimizer.apply_gradients(zip(grads, tvars))
 
     def get_rnncell(self, cell_type, cell_size, keep_prob, num_layer):
-        if cell_type == "gru":
-            cell = tf.nn.rnn_cell.GRUCell(cell_size)
-        else:
-            cell = tf.nn.rnn_cell.LSTMCell(cell_size, use_peepholes=False, forget_bias=1.0)
+        cells = []
+        for _ in range(num_layer):
+            if cell_type == "gru":
+                cell = tf.nn.rnn_cell.GRUCell(cell_size)
+            else:
+                cell = tf.nn.rnn_cell.LSTMCell(cell_size, use_peepholes=False, forget_bias=1.0)
 
-        if keep_prob < 1.0:
-            cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=keep_prob)
+            if keep_prob < 1.0:
+                cell = tf.nn.rnn_cell.DropoutWrapper(cell, output_keep_prob=keep_prob)
+
+            cells.append(cell)
 
         if num_layer > 1:
-            cell = tf.nn.rnn_cell.MultiRNNCell([cell] * num_layer, state_is_tuple=True)
+            cell = tf.nn.rnn_cell.MultiRNNCell(cells, state_is_tuple=True)
+        else:
+            cell = cells[0]
 
         return cell
 

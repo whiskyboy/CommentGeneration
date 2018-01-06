@@ -14,7 +14,7 @@ def argParser():
     parser =argparse.ArgumentParser()
 
     # network
-    parser.add_argument("--enc_cell_size", dest="enc_cell_szie", type=int, default=200)
+    parser.add_argument("--enc_cell_size", dest="enc_cell_size", type=int, default=200)
     parser.add_argument("--dec_cell_size", dest="dec_cell_size", type=int, default=200)
     parser.add_argument("--emb_size", dest="emb_size", type=int, default=200)
 
