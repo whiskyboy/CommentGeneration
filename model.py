@@ -29,8 +29,9 @@ class NMTModel(object):
         self.forward_only = forward_only
 
         self.max_token_len = FLAGS.max_token_len
-        self.enc_cell_size = FLAGS.enc_cell_size
-        self.dec_cell_size = FLAGS.dec_cell_size
+        self.num_units = FLAGS.num_units
+        self.num_layers = FLAGS.num_layers
+        assert(self.num_layers % 2 == 0)
 
         with tf.name_scope("io"):
             self.input_tokens = tf.placeholder(dtype=tf.int32, shape=(None, self.max_token_len), name="source")
@@ -45,13 +46,13 @@ class NMTModel(object):
             self.batch_size = array_ops.shape(self.input_tokens)[0]
 
         with tf.variable_scope("wordEmbedding"):
-            src_embedding = tf.get_variable("src_embedding", [self.src_vocab_size, FLAGS.emb_size], dtype=tf.float32)
+            src_embedding = tf.get_variable("src_embedding", [self.src_vocab_size, self.num_units], dtype=tf.float32)
             # mask <pad> embedding
             src_embedding_mask = tf.constant([0 if i == self.src_padding_id else 1 for i in range(self.src_vocab_size)],
                                              dtype=tf.float32, shape=[self.src_vocab_size, 1])
             src_embedding = src_embedding * src_embedding_mask
 
-            tgt_embedding = tf.get_variable("tgt_embedding", [self.tgt_vocab_size, FLAGS.emb_size], dtype=tf.float32)
+            tgt_embedding = tf.get_variable("tgt_embedding", [self.tgt_vocab_size, self.num_units], dtype=tf.float32)
             # mask <pad> embedding
             tgt_embedding_mask = tf.constant([0 if i == self.tgt_padding_id else 1 for i in range(self.tgt_vocab_size)],
                                              dtype=tf.float32, shape=[self.tgt_vocab_size, 1])
@@ -63,30 +64,39 @@ class NMTModel(object):
 
         with tf.variable_scope("encoder"):
             # bi-gru-rnn
-            fwd_sent_cell = self.get_rnncell("gru", self.enc_cell_size, keep_prob=1.0, num_layer=1)
-            bwd_sent_cell = self.get_rnncell("gru", self.enc_cell_size, keep_prob=1.0, num_layer=1)
+            num_bi_layers = self.num_layers / 2
+            fwd_sent_cell = self.get_rnncell("gru", self.num_units, keep_prob=1.0, num_layer=num_bi_layers)
+            bwd_sent_cell = self.get_rnncell("gru", self.num_units, keep_prob=1.0, num_layer=num_bi_layers)
 
-            encoder_outputs, encoder_state = tf.nn.bidirectional_dynamic_rnn(
+            encoder_outputs, bi_encoder_state = tf.nn.bidirectional_dynamic_rnn(
                 fwd_sent_cell, bwd_sent_cell,
                 input_embedding, sequence_length=self.input_lens,
                 dtype=tf.float32)
             
             encoder_outputs = tf.concat(encoder_outputs, -1)
-            # encoder_state = tf.concat(encoder_state, -1)
+            if num_bi_layers == 1:
+                encoder_state = bi_encoder_state
+            else:
+                encoder_state = []
+                for layer_id in range(num_bi_layers):
+                    encoder_state.append(bi_encoder_state[0][layer_id]) # forward
+                    encoder_state.append(bi_encoder_state[1][layer_id]) # backward
+                encoder_state = tuple(encoder_state)
 
         with tf.variable_scope("decoder"):
-            if self.forward_only:
-                helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
-                    tgt_embedding, tf.fill([self.batch_size], self.tgt_go_id), self.tgt_eos_id)
-            else:
+            if not self.forward_only:
                 dec_input_embedding = output_embedding[:, 0:-1, :]
                 dec_seq_lens = self.output_lens - 1
                 helper = tf.contrib.seq2seq.TrainingHelper(dec_input_embedding, dec_seq_lens)
+            else:
+                helper = tf.contrib.seq2seq.GreedyEmbeddingHelper(
+                    tgt_embedding, tf.fill([self.batch_size], self.tgt_go_id), self.tgt_eos_id)
 
+            dec_cell = self.get_rnncell("gru", self.num_units, keep_prob=1.0, num_layer=self.num_layers)
             attention_states = encoder_outputs
             attention_mechanism = tf.contrib.seq2seq.BahdanauAttention(
-                    self.dec_cell_size, attention_states, memory_sequence_length=self.input_lens)
-            dec_cell = self.get_rnncell("gru", self.dec_cell_size, keep_prob=1.0, num_layer=2)
+                self.num_units, attention_states,
+                memory_sequence_length=self.input_lens, normalize=True)
             attn_cell = tf.contrib.seq2seq.AttentionWrapper(
                 dec_cell, attention_mechanism,
                 output_attention=False

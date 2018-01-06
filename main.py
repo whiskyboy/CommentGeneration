@@ -14,9 +14,8 @@ def argParser():
     parser =argparse.ArgumentParser()
 
     # network
-    parser.add_argument("--enc_cell_size", dest="enc_cell_size", type=int, default=200)
-    parser.add_argument("--dec_cell_size", dest="dec_cell_size", type=int, default=200)
-    parser.add_argument("--emb_size", dest="emb_size", type=int, default=200)
+    parser.add_argument("--num_units", dest="num_units", type=int, default=32)
+    parser.add_argument("--num_layers", dest="num_layers", type=int, default=2)
 
     # data
     parser.add_argument("--out_dir", dest="out_dir", type=str, required=True)
@@ -33,9 +32,9 @@ def argParser():
 
     # others
     parser.add_argument("--max_pass", dest="max_pass", type=int, default=20)
-    parser.add_argument("--init_w", dest="init_w", type=float, default=0.08)
+    parser.add_argument("--init_w", dest="init_w", type=float, default=0.1)
     parser.add_argument("--learning_rate", dest="learning_rate", type=float, default=1e-3)
-    parser.add_argument("--grad_clip", dest="grad_clip", type=float, default=None)
+    parser.add_argument("--grad_clip", dest="grad_clip", type=float, default=5.0)
 
     FLAGS, _ = parser.parse_known_args()
 
